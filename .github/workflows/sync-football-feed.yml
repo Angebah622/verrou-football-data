@@ -1,0 +1,63 @@
+name: Sync Football Feed JSON
+
+on:
+  schedule:
+    - cron: "*/30 * * * *" # Toutes les 30 minutes (gratuit sur dépôt public)
+  workflow_dispatch: # Permet de lancer la mise à jour manuellement en un clic
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-push-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Fetch and normalize JSON data
+        run: |
+          mkdir -p data
+          python3 - <<'EOF'
+          import json
+          import urllib.request
+          from datetime import datetime, timezone
+
+          sources = {
+              "epl_2026_27": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/en.1.json",
+              "laliga_2026_27": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/es.1.json",
+              "bundesliga_2026_27": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/de.1.json",
+              "seriea_2026_27": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/it.1.json",
+              "ligue1_2026_27": "https://raw.githubusercontent.com/openfootball/football.json/master/2026-27/fr.1.json"
+          }
+
+          payload = {
+              "updated_at": datetime.now(timezone.utc).isoformat(),
+              "leagues": {}
+          }
+
+          for key, url in sources.items():
+              try:
+                  with urllib.request.urlopen(url, timeout=15) as resp:
+                      payload["leagues"][key] = json.loads(resp.read().decode("utf-8"))
+              except Exception as exc:
+                  payload["leagues"][key] = {"error": str(exc), "matches": []}
+
+          with open("data/feed.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, ensure_ascii=False, indent=2)
+          EOF
+
+      - name: Commit and push updated JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/feed.json
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: update football feed JSON"
+            git push
+          fi
